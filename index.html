@@ -9,12 +9,11 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <!-- Firebase SDKs -->
     <script type="module">
         // Import the functions you need from the SDKs you need
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, addDoc, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js"; // Added writeBatch for efficient seeding
         // Import Firebase Storage functions
         import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
 
@@ -22,11 +21,11 @@
         window.firebaseApp = null;
         window.db = null;
         window.auth = null;
-        window.storage = null; // New: Firebase Storage instance
+        window.storage = null; 
         window.currentUserId = null;
         window.isAuthReady = false; // Flag to indicate auth state is determined
 
-        // Expose Firestore and Storage functions globally
+        // Expose Firestore and Storage functions globally for use in HTML inline handlers
         window.firestoreCollection = collection;
         window.firestoreDoc = doc;
         window.firestoreGetDoc = getDoc;
@@ -38,8 +37,9 @@
         window.firestoreWhere = where;
         window.firestoreAddDoc = addDoc;
         window.firestoreGetDocs = getDocs;
+        window.firestoreWriteBatch = writeBatch; // Expose writeBatch
 
-        window.firebaseStorageRef = ref; // Expose Storage ref for use in functions
+        window.firebaseStorageRef = ref; 
         window.firebaseUploadBytesResumable = uploadBytesResumable;
         window.firebaseGetDownloadURL = getDownloadURL;
 
@@ -58,17 +58,14 @@
                 appId: "1:22216206687:web:5c5ae96bceb354f29f6eea",
                 measurementId: "G-G7PCJ7M6Q4" // Analytics ID, optional for core functionality
             };
-            // The __initial_auth_token variable is specific to the Canvas environment and is not used in general GitHub Pages deployments.
             const initialAuthToken = null; 
 
-            // This check ensures that the Firebase config has valid values.
             if (!firebaseConfig.projectId || firebaseConfig.projectId === "YOUR_FIREBASE_PROJECT_ID") { 
                 console.error("Firebase config is missing or placeholder values are still used. Data persistence will not work.");
                 showAppMessage("Error: Firebase is NOT configured. Data will NOT be saved. Please ensure Firebase config is correctly set in the code.", "error", 15000); 
                 return;
             }
 
-            // Log the config to console for debugging purposes (remove in production)
             console.log("Firebase config being used:", firebaseConfig);
 
             // Initialize Firebase
@@ -77,7 +74,6 @@
             window.auth = getAuth(window.firebaseApp);
             window.storage = getStorage(window.firebaseApp); // Initialize Firebase Storage
 
-            // Authentication listener to handle user state changes
             onAuthStateChanged(window.auth, async (user) => {
                 if (user) {
                     window.currentUserId = user.uid;
@@ -85,27 +81,18 @@
                 } else {
                     console.log("No user authenticated. Attempting anonymous sign-in.");
                     try {
-                        // For GitHub Pages, anonymous sign-in is the easiest way to get a user ID.
                         await signInAnonymously(window.auth);
                         console.log("Signed in anonymously. User ID:", window.auth.currentUser.uid);
                         window.currentUserId = window.auth.currentUser.uid; 
                     } catch (error) {
                         console.error("Firebase authentication error:", error);
-                        showAppMessage(`Authentication failed: ${error.message}. Data may not be saved.`, "error");
-                        // Fallback to a random ID if auth fails, so app can still render (without persistence)
+                        showAppMessage(`Authentication failed: ${error.message}. Data may not be saved. Ensure Anonymous Auth is enabled in Firebase Console.`, "error", 10000); 
                         window.currentUserId = crypto.randomUUID(); 
                     }
                 }
                 window.isAuthReady = true;
-                // Only start listening to data once auth is ready
-                setupFirestoreListener(appId); // Pass appId to the listener
+                setupFirestoreListener(appId); 
             });
-
-            // The rest of the script's core logic (showAppMessage, showConfirmModal,
-            // initialRawOutreachData, getChannelIcon, updateItemProperty, updateEditableContent,
-            // deleteItem, setupFirestoreListener, renderCalendarGrid, setupFilters,
-            // renderKPIs, renderCharts) should be defined below this DOMContentLoaded block
-            // but still within the <script> tags. They are global by default in this context.
         });
     </script>
     <style>
@@ -193,10 +180,12 @@
             padding: 20px;
             border-radius: 12px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            max-width: 400px;
+            max-width: 500px; /* Wider for more form elements */
             width: 90%;
-            text-align: center;
+            text-align: left; /* Align text left for forms */
             position: relative;
+            max-height: 90vh; /* Limit height for scrollability */
+            overflow-y: auto; /* Enable scrolling for content */
         }
         .modal-buttons {
             margin-top: 20px;
@@ -210,12 +199,13 @@
             cursor: pointer;
             font-weight: 600;
             transition: background-color 0.2s ease-in-out;
+            flex-grow: 1; /* Make buttons expand */
         }
         .modal-confirm {
             background-color: #EF4444; /* Red */
             color: white;
         }
-        .modal-confirm:hover { {
+        .modal-confirm:hover { 
             background-color: #DC2626; /* Darker Red */
         }
         .modal-cancel {
@@ -248,6 +238,34 @@
         .app-message.success {
             background-color: #10B981;
         }
+
+        /* Form elements within modal for better styling */
+        .modal-content input[type="text"],
+        .modal-content input[type="date"],
+        .modal-content input[type="url"],
+        .modal-content textarea,
+        .modal-content select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #D1D5DB; /* Slate-300 equivalent */
+            border-radius: 6px; /* Rounded-md equivalent */
+            margin-top: 4px;
+            margin-bottom: 12px;
+            box-sizing: border-box; /* Include padding in width */
+            font-size: 0.9rem;
+        }
+        .modal-content label {
+            display: block;
+            font-size: 0.875rem; /* text-sm equivalent */
+            font-weight: 500; /* font-medium equivalent */
+            color: #374151; /* slate-700 equivalent */
+            margin-bottom: 4px;
+        }
+        .modal-content .checkbox-container {
+            margin-bottom: 12px;
+            margin-top: 0; /* Override default checkbox-container margin-top */
+        }
+
     </style>
 </head>
 <body class="text-slate-800">
@@ -264,6 +282,9 @@
                 This dashboard provides an interactive overview of Rep. Johns's Q3 2025 outreach plan, highlighting his work as Chair of the Transportation Committee and his focus on Education. Use the filters to explore planned activities. You can now also link to content, update the status of each outreach item, edit the card's content directly, and **all your changes will now be saved automatically!**
             </p>
             <p id="user-id-display" class="text-sm text-slate-500 mt-2">Loading user ID...</p>
+            <button onclick="openAddCardModal()" class="mt-6 bg-blue-700 hover:bg-blue-800 text-white py-3 px-6 rounded-lg text-lg font-semibold shadow-lg transition-colors">
+                + Add New Activity
+            </button>
         </header>
 
         <section id="kpi-section" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-12 text-center">
@@ -334,8 +355,7 @@
             
             <section class="lg:col-span-2 min-h-screen">
                  <div id="calendar-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <!-- Activity cards will be injected here -->
-                </div>
+                    </div>
             </section>
         </main>
         
@@ -344,6 +364,68 @@
             <p class="text-sm text-slate-500 mt-2">For official inquiries, please contact Rep. Johns's office.</p>
         </footer>
     </div>
+
+    <div id="addActivityModal" class="modal hidden">
+        <div class="modal-content">
+            <h3 class="font-bold text-xl text-slate-900 mb-4">Add New Outreach Activity</h3>
+            <form id="newActivityForm">
+                <label for="new-week">Week</label>
+                <input type="number" id="new-week" value="1" min="1" required>
+
+                <label for="new-date">Date</label>
+                <input type="date" id="new-date" value="2025-07-01" required>
+
+                <label for="new-channel">Channel</label>
+                <select id="new-channel" required>
+                    <option value="Facebook">Facebook</option>
+                    <option value="Column">Column</option>
+                    <option value="Press Release">Press Release</option>
+                    <option value="Indigov">Indigov</option>
+                </select>
+
+                <label for="new-theme">Focus Area</label>
+                <select id="new-theme" required>
+                    <option value="Introduction">Introduction</option>
+                    <option value="Transportation">Transportation</option>
+                    <option value="Education">Education</option>
+                    <option value="Community">Community</option>
+                </select>
+
+                <label for="new-title">Title</label>
+                <input type="text" id="new-title" placeholder="e.g., Back-to-School Event" required>
+
+                <label for="new-description">Description</label>
+                <textarea id="new-description" rows="3" placeholder="Brief description of the activity"></textarea>
+
+                <label for="new-audience">Audience</label>
+                <input type="text" id="new-audience" placeholder="e.g., Parents, Students">
+
+                <label for="new-goal">Goal</label>
+                <input type="text" id="new-goal" placeholder="e.g., Inform on school funding">
+
+                <label for="new-link">Content Link (URL)</label>
+                <input type="url" id="new-link" placeholder="https://example.com/content">
+
+                <label for="new-status">Status</label>
+                <select id="new-status" required>
+                    <option value="Planned">Planned</option>
+                    <option value="Scheduled">Scheduled</option>
+                    <option value="Completed">Completed</option>
+                </select>
+
+                <div class="checkbox-container">
+                    <input type="checkbox" id="new-graphic-needed">
+                    <label for="new-graphic-needed">Graphic/Image Needed</label>
+                </div>
+
+                <div class="modal-buttons">
+                    <button type="button" class="modal-cancel" onclick="closeAddCardModal()">Cancel</button>
+                    <button type="submit" class="bg-blue-700 hover:bg-blue-800 text-white py-2 px-4 rounded-md font-semibold transition-colors">Save Activity</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
 
     <script>
         // Global Firebase instances (initialized in the module script head)
@@ -370,6 +452,10 @@
         const userIdDisplay = document.getElementById('user-id-display');
         const modalContainer = document.getElementById('modal-container');
         const appMessageContainer = document.getElementById('app-message-container');
+
+        const addActivityModal = document.getElementById('addActivityModal');
+        const newActivityForm = document.getElementById('newActivityForm');
+
 
         // Function to show custom app messages (e.g., for errors or success)
         function showAppMessage(message, type = 'info', duration = 3000) {
@@ -475,17 +561,17 @@
 
         function getChannelIcon(channel) {
             switch (channel) {
-                case 'Facebook': return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 mr-2 text-blue-600"><path d="M18 2h-3a5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"></path></svg>`;
-                case 'Column': return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 mr-2 text-amber-600"><path d="M12 22h6a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h6Z"/><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h.5"/><path d="M17 12H9.5a3.5 3.5 0 0 0 0 7h.5"/></svg>`;
-                case 'Press Release': return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 mr-2 text-teal-600"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2V6"/><path d="m9 18 3-3 3 3"/><path d="m9 12 3-3 3 3"/><path d="m9 6 3-3 3 3"/></svg>`;
-                case 'Indigov': return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 mr-2 text-indigo-600"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>`;
+                // Changed w-5 h-5 to w-6 h-6 for better rendering
+                case 'Facebook': return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6 mr-2 text-blue-600"><path d="M18 2h-3a5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"></path></svg>`;
+                case 'Column': return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6 mr-2 text-amber-600"><path d="M12 22h6a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h6Z"/><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h.5"/><path d="M17 12H9.5a3.5 3.5 0 0 0 0 7h.5"/></svg>`;
+                case 'Press Release': return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6 mr-2 text-teal-600"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2V6"/><path d="m9 18 3-3 3 3"/><path d="m9 12 3-3 3 3"/><path d="m9 6 3-3 3 3"/></svg>`;
+                case 'Indigov': return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6 mr-2 text-indigo-600"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>`;
                 default: return '';
             }
         }
 
-        // Function to update item properties (for link, status, graphicNeeded)
+        // Function to update item properties (for link, status, graphicNeeded, fileLink, fileName)
         async function updateItemProperty(event, itemId, property) {
-            // Retrieve appId from the data attribute set in setupFirestoreListener
             const currentAppId = document.documentElement.dataset.appId || 'default-app-id'; 
             if (!window.isAuthReady || !window.db || !window.currentUserId) {
                 console.warn("Firestore not ready. Cannot update item.");
@@ -496,7 +582,7 @@
             const itemIndex = outreachData.findIndex(d => d.id === itemId);
             if (itemIndex === -1) return;
 
-            const item = { ...outreachData[itemIndex] }; // Create a shallow copy
+            const item = { ...outreachData[itemIndex] }; 
 
             try {
                 if (property === 'graphicNeeded') {
@@ -506,15 +592,14 @@
                     if (!isNaN(new Date(newDate))) {
                         item[property] = newDate;
                     } else {
-                        showAppMessage('Invalid date format. Please use THAT-MM-DD.', "error");
-                        event.target.value = item[property]; // Revert to old value in UI
+                        showAppMessage('Invalid date format. Please use YYYY-MM-DD.', "error");
+                        event.target.value = item[property]; 
                         return;
                     }
                 } else {
                     item[property] = event.target.value;
                 }
 
-                // Update Firestore
                 const docRef = window.firestoreDoc(window.db, `artifacts/${currentAppId}/users/${window.currentUserId}/outreachItems`, itemId);
                 await window.firestoreUpdateDoc(docRef, { [property]: item[property] });
                 
@@ -527,7 +612,6 @@
 
         // Function to update contenteditable fields (title, description, audience, goal)
         async function updateEditableContent(event, itemId, property) {
-            // Retrieve appId from the data attribute set in setupFirestoreListener
             const currentAppId = document.documentElement.dataset.appId || 'default-app-id'; 
             if (!window.isAuthReady || !window.db || !window.currentUserId) {
                 console.warn("Firestore not ready. Cannot update item.");
@@ -540,12 +624,10 @@
 
             const newValue = event.target.innerText;
             if (outreachData[itemIndex][property] === newValue) {
-                // No change, prevent unnecessary write
-                return;
+                return; // No change, prevent unnecessary write
             }
 
             try {
-                // Update Firestore
                 const docRef = window.firestoreDoc(window.db, `artifacts/${currentAppId}/users/${window.currentUserId}/outreachItems`, itemId);
                 await window.firestoreUpdateDoc(docRef, { [property]: newValue });
                 
@@ -558,7 +640,6 @@
 
         // Function to delete an item
         function deleteItem(itemId) {
-            // Retrieve appId from the data attribute set in setupFirestoreListener
             const currentAppId = document.documentElement.dataset.appId || 'default-app-id'; 
             if (!window.isAuthReady || !window.db || !window.currentUserId) {
                 console.warn("Firestore not ready. Cannot delete item.");
@@ -579,135 +660,154 @@
         }
 
         // --- Firestore Data Setup and Listening ---
-        // setupFirestoreListener now takes appId as an argument
         async function setupFirestoreListener(appId) { 
             if (!window.db || !window.currentUserId) {
                 console.warn("Firestore or User ID not available for listener setup.");
                 return;
             }
 
-            // Store appId in a data attribute on html element for global access in functions outside DOMContentLoaded
-            // This is safer than relying on a global variable that might be overwritten or not initialized in time.
             document.documentElement.dataset.appId = appId;
-
             userIdDisplay.textContent = `User ID: ${window.currentUserId}`;
             loadingIndicator.classList.remove('hidden');
 
             const outreachCollectionRef = window.firestoreCollection(window.db, `artifacts/${appId}/users/${window.currentUserId}/outreachItems`);
-            
-            // Check if collection is empty and seed initial data if needed
-            const snapshot = await window.firestoreGetDocs(outreachCollectionRef);
-            if (snapshot.empty) {
-                console.log("Collection is empty. Seeding initial data.");
-                showAppMessage("First-time setup: Populating initial data...", "info", 5000);
-                for (const item of initialRawOutreachData) {
-                    const newItem = { ...item, id: crypto.randomUUID(), link: '', status: 'Planned', graphicNeeded: false, fileLink: '' }; // Added fileLink
-                     // Adjust column dates to Sundays (logic from previous version)
-                    if (newItem.channel === 'Column') {
-                        const originalDate = new Date(newItem.date);
-                        const dayOfWeek = originalDate.getDay(); // 0 for Sunday, 1 for Monday, etc.
-                        const diff = 0 - dayOfWeek; 
-                        originalDate.setDate(originalDate.getDate() + diff);
-                        newItem.date = originalDate.toISOString().split('T')[0]; 
-                    }
-                    try {
-                        // Use setDoc with the ID to ensure consistent IDs and prevent duplicates on re-seed attempts
-                        await window.firestoreSetDoc(window.firestoreDoc(outreachCollectionRef, newItem.id), newItem);
-                    } catch (e) {
-                        console.error("Error adding initial document: ", e);
-                        showAppMessage(`Error seeding data: ${e.message}`, "error");
-                    }
-                }
-            }
+            const metadataDocRef = window.firestoreDoc(window.db, `artifacts/${appId}/users/${window.currentUserId}/appMetadata/seedStatus`);
 
-            // Listen for real-time updates
+            // --- Robust Seeding Logic ---
+            try {
+                const metadataDocSnap = await window.firestoreGetDoc(metadataDocRef);
+                if (!metadataDocSnap.exists() || metadataDocSnap.data().seeded === false) {
+                    console.info("Firestore: Collection appears unseeded or explicitly not seeded. Attempting to seed initial data.");
+                    showAppMessage("First-time setup: Populating initial data...", "info", 5000);
+
+                    const batch = window.firestoreWriteBatch(window.db); // Get a new batch instance
+
+                    for (const item of initialRawOutreachData) {
+                        const newItem = { 
+                            ...item, 
+                            id: crypto.randomUUID(), 
+                            link: '', 
+                            status: 'Planned', 
+                            graphicNeeded: false, 
+                            fileLink: '', // Ensure these are initialized for new items
+                            fileName: '' 
+                        };
+                        // Adjust column dates to Sundays
+                        if (newItem.channel === 'Column') {
+                            const originalDate = new Date(newItem.date);
+                            const dayOfWeek = originalDate.getDay(); 
+                            const diff = 0 - dayOfWeek; 
+                            originalDate.setDate(originalDate.getDate() + diff);
+                            newItem.date = originalDate.toISOString().split('T')[0]; 
+                        }
+                        batch.set(window.firestoreDoc(outreachCollectionRef, newItem.id), newItem);
+                    }
+                    
+                    batch.set(metadataDocRef, { seeded: true }); // Mark as seeded in the same batch
+                    await batch.commit();
+                    console.info("Firestore: Initial data seeding batch committed successfully.");
+                    showAppMessage("Initial data loaded!", "success", 3000);
+
+                } else {
+                    console.info("Firestore: Initial data already seeded. Skipping seeding process.");
+                }
+            } catch (seedError) {
+                console.error("Firestore: Error during initial data seeding or metadata check:", seedError);
+                showAppMessage(`Error during initial setup: ${seedError.message}. Data might be incomplete or duplicated.`, "error", 8000);
+            }
+            // --- End Robust Seeding Logic ---
+
+            // Listen for real-time updates (always attach the listener after seeding check)
             window.firestoreOnSnapshot(outreachCollectionRef, (snapshot) => {
-                outreachData = []; // Clear current data
+                outreachData = []; // Clear current data before populating from snapshot
                 snapshot.forEach(doc => {
                     outreachData.push({ id: doc.id, ...doc.data() });
                 });
                 
-                // Sort data by date after fetching
-                outreachData.sort((a, b) => new Date(a.date) - new Date(b.date));
+                outreachData.sort((a, b) => new Date(a.date) - new Date(b.date)); // Sort data by date
 
-                console.log("Data fetched/updated from Firestore. Total items:", outreachData.length);
+                console.log("Firestore: Data fetched/updated. Total items:", outreachData.length);
                 renderCalendarGrid();
                 renderKPIs();
                 renderCharts();
                 loadingIndicator.classList.add('hidden');
             }, (error) => {
-                console.error("Error listening to Firestore:", error);
+                console.error("Firestore: Error listening to updates:", error);
                 showAppMessage(`Error loading data: ${error.message}`, "error");
                 loadingIndicator.classList.add('hidden');
             });
 
-            // Initialize filters UI after initial data load
+            // Initialize filters UI after initial data load or listener setup
             setupFilters();
         }
 
-        // --- File Upload Logic ---
-        async function handleFileUpload(event, itemId) {
-            const file = event.target.files[0];
-            if (!file) return;
+        // --- Modal and Add New Card Functions ---
+        function openAddCardModal() {
+            addActivityModal.classList.remove('hidden');
+            // Reset form fields
+            newActivityForm.reset();
+            // Set default date to today for convenience
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('new-date').value = today;
+            // Set default status and graphicNeeded
+            document.getElementById('new-status').value = 'Planned';
+            document.getElementById('new-graphic-needed').checked = false;
+        }
 
-            if (!window.isAuthReady || !window.storage || !window.currentUserId) {
-                console.warn("Firebase Storage not ready. Cannot upload file.");
-                showAppMessage("Firebase Storage is not ready. Please wait or refresh.", "error");
+        function closeAddCardModal() {
+            addActivityModal.classList.add('hidden');
+        }
+
+        newActivityForm.addEventListener('submit', async (event) => {
+            event.preventDefault(); // Prevent default form submission
+
+            const currentAppId = document.documentElement.dataset.appId || 'default-app-id'; 
+            if (!window.isAuthReady || !window.db || !window.currentUserId) {
+                showAppMessage("Firestore not ready. Cannot add new activity.", "error");
                 return;
             }
 
-            const fileStatusElement = document.getElementById(`file-status-${itemId}`);
-            const uploadedFileLinkElement = document.getElementById(`uploaded-file-link-${itemId}`);
-            const currentAppId = document.documentElement.dataset.appId || 'default-app-id';
+            // Collect form data
+            const newCardData = {
+                id: crypto.randomUUID(), // Generate a unique ID for the new document
+                week: parseInt(document.getElementById('new-week').value),
+                date: document.getElementById('new-date').value,
+                channel: document.getElementById('new-channel').value,
+                theme: document.getElementById('new-theme').value,
+                title: document.getElementById('new-title').value,
+                description: document.getElementById('new-description').value,
+                audience: document.getElementById('new-audience').value,
+                goal: document.getElementById('new-goal').value,
+                link: document.getElementById('new-link').value,
+                status: document.getElementById('new-status').value,
+                graphicNeeded: document.getElementById('new-graphic-needed').checked,
+                fileLink: '', // New cards start without a file
+                fileName: ''
+            };
 
-            fileStatusElement.textContent = 'Uploading... 0%';
-            fileStatusElement.classList.remove('text-red-500', 'text-green-500');
-            fileStatusElement.classList.add('text-blue-500');
-            uploadedFileLinkElement.innerHTML = ''; // Clear previous link
+            // Basic validation
+            if (!newCardData.title || !newCardData.date || !newCardData.channel) {
+                showAppMessage("Title, Date, and Channel are required.", "error");
+                return;
+            }
+            if (isNaN(new Date(newCardData.date))) {
+                 showAppMessage("Invalid date format for new activity. Please use YYYY-MM-DD.", "error");
+                 return;
+            }
 
-            const storageRef = window.firebaseStorageRef(window.storage, `artifacts/${currentAppId}/users/${window.currentUserId}/card_files/${itemId}/${file.name}`);
-            const uploadTask = window.firebaseUploadBytesResumable(storageRef, file);
+            try {
+                const docRef = window.firestoreDoc(window.db, `artifacts/${currentAppId}/users/${window.currentUserId}/outreachItems`, newCardData.id);
+                await window.firestoreSetDoc(docRef, newCardData);
+                
+                showAppMessage("New activity added successfully!", "success");
+                closeAddCardModal(); // Close modal on success
+            } catch (error) {
+                console.error("Error adding new activity:", error);
+                showAppMessage(`Failed to add new activity: ${error.message}`, "error");
+            }
+        });
 
-            uploadTask.on('state_changed', 
-                (snapshot) => {
-                    const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-                    fileStatusElement.textContent = `Uploading... ${progress.toFixed(0)}%`;
-                }, 
-                (error) => {
-                    console.error("File upload failed:", error);
-                    fileStatusElement.textContent = `Upload failed: ${error.message}`;
-                    fileStatusElement.classList.remove('text-blue-500');
-                    fileStatusElement.classList.add('text-red-500');
-                    showAppMessage(`File upload failed: ${error.message}`, "error");
-                }, 
-                async () => {
-                    try {
-                        const downloadURL = await window.firebaseGetDownloadURL(uploadTask.snapshot.ref);
-                        console.log('File available at', downloadURL);
-
-                        // Update Firestore document with the file link
-                        const docRef = window.firestoreDoc(window.db, `artifacts/${currentAppId}/users/${window.currentUserId}/outreachItems`, itemId);
-                        await window.firestoreUpdateDoc(docRef, { fileLink: downloadURL, fileName: file.name }); // Save both URL and name
-
-                        fileStatusElement.textContent = `Uploaded: ${file.name}`;
-                        fileStatusElement.classList.remove('text-blue-500', 'text-red-500');
-                        fileStatusElement.classList.add('text-green-500');
-                        uploadedFileLinkElement.innerHTML = `<a href="${downloadURL}" target="_blank" class="text-blue-600 hover:underline text-sm break-all">${file.name}</a>`;
-                        showAppMessage("File uploaded successfully!", "success");
-                        // Re-render grid to update the file link display (optional, as it's updated directly)
-                        renderCalendarGrid(); 
-                    } catch (error) {
-                        console.error("Error getting download URL or updating Firestore:", error);
-                        fileStatusElement.textContent = `Post-upload error: ${error.message}`;
-                        fileStatusElement.classList.remove('text-blue-500');
-                        fileStatusElement.classList.add('text-red-500');
-                        showAppMessage(`Error processing uploaded file: ${error.message}`, "error");
-                    }
-                }
-            );
-        }
-
-        // --- Existing UI Rendering and Filter Functions (moved outside DOMContentLoaded for clarity) ---
+        // --- Existing UI Rendering and Filter Functions ---
 
         function renderCalendarGrid() {
             calendarGrid.innerHTML = '';
@@ -778,7 +878,6 @@
                         <label for="graphic-${item.id}" class="cursor-pointer">Graphic/Image Needed</label>
                     </div>
 
-                    <!-- File Upload Section -->
                     <div class="mb-4">
                         <label class="block text-xs font-medium text-slate-500 mb-1">Upload Content File</label>
                         <input type="file" id="file-upload-${item.id}" class="hidden" onchange="handleFileUpload(event, '${item.id}')">
@@ -790,8 +889,6 @@
                             ${fileLinkDisplay}
                         </div>
                     </div>
-                    <!-- End File Upload Section -->
-
                     <div class="text-xs space-y-2 text-slate-500 mt-4 pt-4 border-t border-slate-100">
                        <p><strong class="font-medium text-slate-600">Audience:</strong> <span class="editable-text-field" contenteditable="true" onblur="updateEditableContent(event, '${item.id}', 'audience')">${item.audience}</span></p>
                        <p><strong class="font-medium text-slate-600">Goal:</strong> <span class="editable-text-field" contenteditable="true" onblur="updateEditableContent(event, '${item.id}', 'goal')">${item.goal}</span></p>
@@ -987,7 +1084,9 @@
         window.deleteItem = deleteItem;
         window.showAppMessage = showAppMessage; // For custom app messages if needed elsewhere
         window.showConfirmModal = showConfirmModal; // For custom confirmation modal
-        window.handleFileUpload = handleFileUpload; // New: Expose file upload handler
+        window.handleFileUpload = handleFileUpload; // Expose file upload handler
+        window.openAddCardModal = openAddCardModal; // Expose modal opener
+        window.closeAddCardModal = closeAddCardModal; // Expose modal closer
 
     </script>
 
