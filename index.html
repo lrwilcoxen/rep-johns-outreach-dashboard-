@@ -12,21 +12,21 @@
     <!-- Firebase SDKs -->
     <script type="module">
         // Import the functions you need from the SDKs you need
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js"; // Keep this import
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js"; // Keep this import for Auth
-        import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js"; // Keep this import for Firestore
-        // You can remove the getAnalytics import if you don't plan to use it:
-        // import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-analytics.js"; 
-
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        // Import Firebase Storage functions
+        import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
 
         // Global Firebase instances (will be initialized in DOMContentLoaded)
         window.firebaseApp = null;
         window.db = null;
         window.auth = null;
+        window.storage = null; // New: Firebase Storage instance
         window.currentUserId = null;
         window.isAuthReady = false; // Flag to indicate auth state is determined
 
-        // Expose Firestore functions globally
+        // Expose Firestore and Storage functions globally
         window.firestoreCollection = collection;
         window.firestoreDoc = doc;
         window.firestoreGetDoc = getDoc;
@@ -38,6 +38,10 @@
         window.firestoreWhere = where;
         window.firestoreAddDoc = addDoc;
         window.firestoreGetDocs = getDocs;
+
+        window.firebaseStorageRef = ref; // Expose Storage ref for use in functions
+        window.firebaseUploadBytesResumable = uploadBytesResumable;
+        window.firebaseGetDownloadURL = getDownloadURL;
 
         document.addEventListener('DOMContentLoaded', async () => {
             // ====================================================================================================================================
@@ -58,18 +62,20 @@
             const initialAuthToken = null; 
 
             // This check ensures that the Firebase config has valid values.
-            if (!firebaseConfig.projectId || firebaseConfig.projectId === "YOUR_FIREBASE_PROJECT_ID") { // Added a more robust check
+            if (!firebaseConfig.projectId || firebaseConfig.projectId === "YOUR_FIREBASE_PROJECT_ID") { 
                 console.error("Firebase config is missing or placeholder values are still used. Data persistence will not work.");
                 showAppMessage("Error: Firebase is NOT configured. Data will NOT be saved. Please ensure Firebase config is correctly set in the code.", "error", 15000); 
                 return;
             }
 
+            // Log the config to console for debugging purposes (remove in production)
+            console.log("Firebase config being used:", firebaseConfig);
+
             // Initialize Firebase
             window.firebaseApp = initializeApp(firebaseConfig);
             window.db = getFirestore(window.firebaseApp);
             window.auth = getAuth(window.firebaseApp);
-            // If you want to use analytics, uncomment this:
-            // const analytics = getAnalytics(window.firebaseApp);
+            window.storage = getStorage(window.firebaseApp); // Initialize Firebase Storage
 
             // Authentication listener to handle user state changes
             onAuthStateChanged(window.auth, async (user) => {
@@ -209,7 +215,7 @@
             background-color: #EF4444; /* Red */
             color: white;
         }
-        .modal-confirm:hover {
+        .modal-confirm:hover { {
             background-color: #DC2626; /* Darker Red */
         }
         .modal-cancel {
@@ -500,7 +506,7 @@
                     if (!isNaN(new Date(newDate))) {
                         item[property] = newDate;
                     } else {
-                        showAppMessage('Invalid date format. Please use YYYY-MM-DD.', "error");
+                        showAppMessage('Invalid date format. Please use THAT-MM-DD.', "error");
                         event.target.value = item[property]; // Revert to old value in UI
                         return;
                     }
@@ -595,7 +601,7 @@
                 console.log("Collection is empty. Seeding initial data.");
                 showAppMessage("First-time setup: Populating initial data...", "info", 5000);
                 for (const item of initialRawOutreachData) {
-                    const newItem = { ...item, id: crypto.randomUUID(), link: '', status: 'Planned', graphicNeeded: false };
+                    const newItem = { ...item, id: crypto.randomUUID(), link: '', status: 'Planned', graphicNeeded: false, fileLink: '' }; // Added fileLink
                      // Adjust column dates to Sundays (logic from previous version)
                     if (newItem.channel === 'Column') {
                         const originalDate = new Date(newItem.date);
@@ -639,6 +645,68 @@
             setupFilters();
         }
 
+        // --- File Upload Logic ---
+        async function handleFileUpload(event, itemId) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            if (!window.isAuthReady || !window.storage || !window.currentUserId) {
+                console.warn("Firebase Storage not ready. Cannot upload file.");
+                showAppMessage("Firebase Storage is not ready. Please wait or refresh.", "error");
+                return;
+            }
+
+            const fileStatusElement = document.getElementById(`file-status-${itemId}`);
+            const uploadedFileLinkElement = document.getElementById(`uploaded-file-link-${itemId}`);
+            const currentAppId = document.documentElement.dataset.appId || 'default-app-id';
+
+            fileStatusElement.textContent = 'Uploading... 0%';
+            fileStatusElement.classList.remove('text-red-500', 'text-green-500');
+            fileStatusElement.classList.add('text-blue-500');
+            uploadedFileLinkElement.innerHTML = ''; // Clear previous link
+
+            const storageRef = window.firebaseStorageRef(window.storage, `artifacts/${currentAppId}/users/${window.currentUserId}/card_files/${itemId}/${file.name}`);
+            const uploadTask = window.firebaseUploadBytesResumable(storageRef, file);
+
+            uploadTask.on('state_changed', 
+                (snapshot) => {
+                    const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                    fileStatusElement.textContent = `Uploading... ${progress.toFixed(0)}%`;
+                }, 
+                (error) => {
+                    console.error("File upload failed:", error);
+                    fileStatusElement.textContent = `Upload failed: ${error.message}`;
+                    fileStatusElement.classList.remove('text-blue-500');
+                    fileStatusElement.classList.add('text-red-500');
+                    showAppMessage(`File upload failed: ${error.message}`, "error");
+                }, 
+                async () => {
+                    try {
+                        const downloadURL = await window.firebaseGetDownloadURL(uploadTask.snapshot.ref);
+                        console.log('File available at', downloadURL);
+
+                        // Update Firestore document with the file link
+                        const docRef = window.firestoreDoc(window.db, `artifacts/${currentAppId}/users/${window.currentUserId}/outreachItems`, itemId);
+                        await window.firestoreUpdateDoc(docRef, { fileLink: downloadURL, fileName: file.name }); // Save both URL and name
+
+                        fileStatusElement.textContent = `Uploaded: ${file.name}`;
+                        fileStatusElement.classList.remove('text-blue-500', 'text-red-500');
+                        fileStatusElement.classList.add('text-green-500');
+                        uploadedFileLinkElement.innerHTML = `<a href="${downloadURL}" target="_blank" class="text-blue-600 hover:underline text-sm break-all">${file.name}</a>`;
+                        showAppMessage("File uploaded successfully!", "success");
+                        // Re-render grid to update the file link display (optional, as it's updated directly)
+                        renderCalendarGrid(); 
+                    } catch (error) {
+                        console.error("Error getting download URL or updating Firestore:", error);
+                        fileStatusElement.textContent = `Post-upload error: ${error.message}`;
+                        fileStatusElement.classList.remove('text-blue-500');
+                        fileStatusElement.classList.add('text-red-500');
+                        showAppMessage(`Error processing uploaded file: ${error.message}`, "error");
+                    }
+                }
+            );
+        }
+
         // --- Existing UI Rendering and Filter Functions (moved outside DOMContentLoaded for clarity) ---
 
         function renderCalendarGrid() {
@@ -674,6 +742,9 @@
                 card.className = cardClasses;
                 card.style.animationDelay = `${index * 30}ms`;
 
+                // Determine initial display for file link
+                const fileLinkDisplay = item.fileLink ? `<a href="${item.fileLink}" target="_blank" class="text-blue-600 hover:underline text-sm break-all">${item.fileName || 'View File'}</a>` : 'No file uploaded.';
+
                 card.innerHTML = `
                     <div class="flex items-center text-sm font-semibold text-slate-600 mb-3">
                         ${getChannelIcon(item.channel)}
@@ -706,6 +777,20 @@
                         <input type="checkbox" id="graphic-${item.id}" ${item.graphicNeeded ? 'checked' : ''} onchange="updateItemProperty(event, '${item.id}', 'graphicNeeded')">
                         <label for="graphic-${item.id}" class="cursor-pointer">Graphic/Image Needed</label>
                     </div>
+
+                    <!-- File Upload Section -->
+                    <div class="mb-4">
+                        <label class="block text-xs font-medium text-slate-500 mb-1">Upload Content File</label>
+                        <input type="file" id="file-upload-${item.id}" class="hidden" onchange="handleFileUpload(event, '${item.id}')">
+                        <button onclick="document.getElementById('file-upload-${item.id}').click()" class="w-full bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded-md text-sm font-medium transition-colors">
+                            Choose File
+                        </button>
+                        <div id="file-status-${item.id}" class="text-xs mt-2 text-slate-600"></div>
+                        <div id="uploaded-file-link-${item.id}" class="mt-1 text-sm">
+                            ${fileLinkDisplay}
+                        </div>
+                    </div>
+                    <!-- End File Upload Section -->
 
                     <div class="text-xs space-y-2 text-slate-500 mt-4 pt-4 border-t border-slate-100">
                        <p><strong class="font-medium text-slate-600">Audience:</strong> <span class="editable-text-field" contenteditable="true" onblur="updateEditableContent(event, '${item.id}', 'audience')">${item.audience}</span></p>
@@ -902,6 +987,7 @@
         window.deleteItem = deleteItem;
         window.showAppMessage = showAppMessage; // For custom app messages if needed elsewhere
         window.showConfirmModal = showConfirmModal; // For custom confirmation modal
+        window.handleFileUpload = handleFileUpload; // New: Expose file upload handler
 
     </script>
 
